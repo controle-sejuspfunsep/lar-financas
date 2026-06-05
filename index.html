@@ -1073,8 +1073,9 @@ tr:hover td { background: var(--cream); }
 // ════════════════════════════════════════════════
 // CONFIG SUPABASE
 // ════════════════════════════════════════════════
-var SB_URL = 'https://tggknelbgeijojnimrcq.supabase.co';
-var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRnZ2tuZWxiZ2Vpam9qbmltcmNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwOTM2NzUsImV4cCI6MjA5NTY2OTY3NX0.SXLMPxbUmqexVj3Hkx_ZCcHVq332uHS9rP1-2cVK-4Q';var sbClient = null;
+var SB_URL = 'SEU_SUPABASE_URL';
+var SB_KEY = 'SUA_ANON_KEY';
+var sbClient = null;
 var sbOn = false;
 
 try {
@@ -1214,6 +1215,7 @@ async function iniciarApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   FAMILIA_ID = USER.id;
+  console.log('Usuário logado:', USER.email, '| FAMILIA_ID:', FAMILIA_ID);
 
   // Popular seletor de meses
   var sel = document.getElementById('mes-sel');
@@ -1288,13 +1290,22 @@ async function salvarConfigSb() {
 async function carregarLancamentos() {
   if (!sbOn) { return; }
   try {
+    // Calcular último dia do mês corretamente
+    var partes = mesSel.split('-');
+    var ultimoDia = new Date(parseInt(partes[0]), parseInt(partes[1]), 0).getDate();
+    var dataFim = mesSel + '-' + ('0'+ultimoDia).slice(-2);
+
     var r = await sbClient.from('lar_lancamentos').select('*')
       .eq('user_id', FAMILIA_ID)
       .gte('data', mesSel+'-01')
-      .lte('data', mesSel+'-31')
+      .lte('data', dataFim)
       .order('data', {ascending:false});
-    if (!r.error) LANCAMENTOS = r.data||[];
-  } catch(e) {}
+    if (r.error) {
+      console.warn('Erro ao carregar lançamentos:', r.error.message);
+    } else {
+      LANCAMENTOS = r.data||[];
+    }
+  } catch(e) { console.warn('Erro carregarLancamentos:', e); }
 }
 
 async function carregarContasFixas() {
@@ -1463,22 +1474,28 @@ async function salvarLanc() {
   var payload = { user_id:FAMILIA_ID, descricao:desc, valor:valor, data:data, tipo:tipoAtual, categoria:cat, recorrente:recorr, obs:obs, lancado_por:CONFIG.m1||USER.email };
 
   try {
+    var resultado;
     if (editId) {
-      await sbClient.from('lar_lancamentos').update(payload).eq('id', editId);
+      resultado = await sbClient.from('lar_lancamentos').update(payload).eq('id', editId);
     } else {
-      await sbClient.from('lar_lancamentos').insert(payload);
+      resultado = await sbClient.from('lar_lancamentos').insert(payload).select();
+    }
+    if (resultado.error) {
+      console.error('Erro Supabase:', resultado.error);
+      toast('Erro: ' + resultado.error.message, false);
+      return;
     }
     // Se é conta fixa, salvar também em contas_fixas
     if (recorr==='fixo' && tipoAtual==='despesa' && !editId) {
-      await sbClient.from('lar_contas_fixas').insert({ user_id:FAMILIA_ID, nome:desc, valor:valor, vencimento:new Date(data).getDate(), categoria:cat, status:'pago', obs:obs });
+      await sbClient.from('lar_contas_fixas').insert({ user_id:FAMILIA_ID, nome:desc, valor:valor, vencimento:new Date(data+'T12:00:00').getDate(), categoria:cat, status:'pago', obs:obs });
     }
+    fecharModal('m-lanc');
+    toast('Lançamento salvo! ✓', true);
     await carregarLancamentos();
     await carregarContasFixas();
     renderDashboard();
     renderLancamentos();
-    fecharModal('m-lanc');
-    toast('Lançamento salvo!', true);
-  } catch(e) { toast('Erro ao salvar.', false); }
+  } catch(e) { console.error('Erro ao salvar:', e); toast('Erro ao salvar: '+e.message, false); }
 }
 
 async function excluirLanc(id) {
